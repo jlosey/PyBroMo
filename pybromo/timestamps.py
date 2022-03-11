@@ -77,7 +77,7 @@ def merge_da(ts_d, ts_par_d, ts_a, ts_par_a):
 def em_rates_from_E_DA(em_rate_tot, E_values):
     """Donor and Acceptor emission rates from total emission rate and E (FRET).
     """
-    E_values = np.asarray(E_values)
+    #E_values = np.asarray(E_values)
     em_rates_a = E_values * em_rate_tot
     em_rates_d = em_rate_tot - em_rates_a
     return em_rates_d, em_rates_a
@@ -99,7 +99,6 @@ def em_rates_from_E_DA_mix(em_rates_tot, E_values):
         em_rates_d.append(em_rate_di)
         em_rates_a.append(em_rate_ai)
     return em_rates_d, em_rates_a
-
 
 def populations_diff_coeff(particles, num_particles_per_population=None):
     """Return a list of diffusion coefficients for the specified populations.
@@ -164,7 +163,7 @@ class TimestampSimulation:
     - `ts`, `a_ch`, `part`, `clk_p`
     """
 
-    def __init__(self, S, em_rates, E_values, num_particles,
+    def __init__(self, S ,E , em_rates, num_particles,
                  bg_rate_d, bg_rate_a, timeslice=None):
         """
         Arguments:
@@ -194,18 +193,32 @@ class TimestampSimulation:
             timeslice = S.t_max
         assert timeslice <= S.t_max
 
-        em_rates_d, em_rates_a = em_rates_from_E_DA_mix(em_rates, E_values)
+                   
+        #dist = np.asarray(S.dye_distances)
+        #dist[dist<0] = 0.
+        #assert E_method in ["theoretical","empirical"]
+        #if E_method == "empirical":
+        #    E_values = 1/(1.+0.975*(dist/R0)**2.65)
+        #elif E_method == "theoretical":
+        #    E_values = 1/(1+(dist/R0)**6)
+        #em_rates_d, em_rates_a = em_rates_from_E_DA_mix(em_rates, S.efficiency)
+        #em_rates_d, em_rates_a = em_rates_from_E_DA(em_rates, E_values.T)
         populations = S.particles.num_particles_to_slices(num_particles)
         D_values = populations_diff_coeff(S.particles, num_particles)
-        assert (len(em_rates) == len(E_values) == len(num_particles) ==
+        #assert (len(em_rates) == len(E_values) == len(num_particles) ==
+        assert (len(em_rates) == len(num_particles) ==
                 len(populations) == len(D_values))
+        
+        #Calc max em rates from efficiency and emission and store
+        #S._add_max_rates(em_rates=em_rates,populations=populations,timeslice=timeslice)
 
-        params = dict(S=S, em_rates=em_rates, E_values=E_values,
+        params = dict(S=S, E=E, em_rates=em_rates, #E_values=E_values,
                       num_particles=num_particles, bg_rate_d=bg_rate_d,
                       bg_rate_a=bg_rate_a, timeslice=timeslice,
-                      em_rates_d=em_rates_d, em_rates_a=em_rates_a,
-                      D_values=D_values, populations=populations,
-                      traj_filename=S.store.filepath.name, save_pos=False)
+                      #em_rates_d=em_rates_d, em_rates_a=em_rates_a,
+                      D_values=D_values, populations=populations, 
+                      #E_method=E_method, R0=R0,
+                      traj_filename=S.store.filepath.name, save_pos=False, )
 
         for k, v in params.items():
             setattr(self, k, v)
@@ -223,23 +236,31 @@ class TimestampSimulation:
             # particles:        {num_pop} (first particle {pop.start})
             D                   {D} m^2/s
             Peak emission rate: {em_rate:,.0f} cps
-            FRET efficiency:    {E:7.1%}
+            FRET efficiency:    Varies
         """
     txt_background = """
         Background:
             Donor:              {self.bg_rate_d:7,} cps
             Acceptor:           {self.bg_rate_a:7,} cps
         """
+    txt_E_method = """
+        Efficiency method:      {self.E.E_method}
+	    R0:                     {self.E.R0}
+    """
 
     def __str__(self):
         txt = [self.txt_header.format(self=self)]
-        pop_params = (self.em_rates, self.E_values, self.num_particles,
+        #pop_params = (self.em_rates, self.E_values, self.num_particles,
+        pop_params = (self.em_rates, self.num_particles,
                       self.D_values, self.populations)
-        for p_i, (em_rate, E, num_pop, D, pop) in enumerate(zip(*pop_params)):
+        #for p_i, (em_rate, E, num_pop, D, pop) in enumerate(zip(*pop_params)):
+        for p_i, (em_rate, num_pop, D, pop) in enumerate(zip(*pop_params)):
             txt.append(self.txt_population.format(p_i=p_i + 1,
-                       num_pop=num_pop, D=D, em_rate=em_rate, E=E, pop=pop))
+                       #num_pop=num_pop, D=D, em_rate=em_rate, E=E, pop=pop))
+                       num_pop=num_pop, D=D, em_rate=em_rate, pop=pop))
 
         txt.append(self.txt_background.format(self=self))
+        txt.append(self.txt_E_method.format(self=self))
         return ''.join(txt)
 
     def summarize(self):
@@ -250,7 +271,8 @@ class TimestampSimulation:
                     for np, pop in zip(self.num_particles, self.populations))
         s1 = 'P_' + '_'.join(part_seq)
         s2 = 'D_' + '_'.join('%.1e' % D for D in self.D_values)
-        s3 = 'E_' + '_'.join('%d' % (E * 100) for E in self.E_values)
+        #s3 = 'E_' + '_'.join('%d' % (E * 100) for E in self.E_values)
+        s3 = ''
         s4 = 'EmTot_' + '_'.join('%dk' % (em * 1e-3) for em in self.em_rates)
         s5 = 'BgD%d_BgA%d' % (self.bg_rate_d, self.bg_rate_a)
         s6 = 't_max_%ds' % self.timeslice
@@ -289,13 +311,15 @@ class TimestampSimulation:
         if chunksize is not None:
             kwargs['chunksize'] = chunksize
         header = ' - Mixture Simulation:'
-
+        #self.S.calc_max_rates()
+       
         # Donor timestamps hash is from the input RandomState
         self.hash_d = hashfunc(rs.get_state())[:6]   # needed by merge_da()
         print('%s Donor timestamps -    %s' % (header, ctime()), flush=True)
         self.S.simulate_timestamps_mix(
             populations=self.populations,
-            max_rates=self.em_rates_d,
+            max_rates=self.E.max_em_rate_d,
+            max_rates_full=self.em_rates,
             bg_rate=self.bg_rate_d,
             **kwargs)
 
@@ -308,7 +332,8 @@ class TimestampSimulation:
         print('\n%s Acceptor timestamps - %s' % (header, ctime()), flush=True)
         self.S.simulate_timestamps_mix(
             populations=self.populations,
-            max_rates=self.em_rates_a,
+            max_rates=self.E.max_em_rate_a,
+            max_rates_full=self.em_rates,
             bg_rate=self.bg_rate_a,
             **kwargs)
         self.save_pos = save_pos
@@ -351,14 +376,14 @@ class TimestampSimulation:
     @property
     def name_timestamps_d(self):
         names_d = self.S.timestamps_match_mix(
-            self.em_rates_d, self.populations, self.bg_rate_d, self.hash_d)
+            self.em_rates, self.populations, self.bg_rate_d, self.hash_d)
         assert len(names_d) == 1
         return names_d[0]
 
     @property
     def name_timestamps_a(self):
         names_a = self.S.timestamps_match_mix(
-            self.em_rates_a, self.populations, self.bg_rate_a, self.hash_a)
+            self.em_rates, self.populations, self.bg_rate_a, self.hash_a)
         assert len(names_a) == 1
         return names_a[0]
 

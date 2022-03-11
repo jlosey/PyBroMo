@@ -29,6 +29,7 @@ __version__ = get_versions()['version']
 
 # Avogadro constant
 NA = 6.022141e23    # [mol^-1]
+kb = 0.001985875    # [kcal/(mol K)]
 
 
 def get_seed(seed, ID=0, EID=0):
@@ -77,9 +78,10 @@ class Box:
 
 class Particle(object):
     """Class to describe a single particle."""
-    def __init__(self, D, x0, y0, z0):
+    def __init__(self, D, x0, y0, z0, dye0, dye_center):
         self.D = D   # diffusion coefficient in SI units, m^2/s
-        self.x0, self.y0, self.z0 = x0, y0, z0
+        self.x0, self.y0, self.z0, self.dye0 = x0, y0, z0, dye0
+        self.dye_center = dye_center
 
     @property
     def r0(self):
@@ -89,23 +91,26 @@ class Particle(object):
         return (self.r0 == other.r0).all() and self.D == other.D
 
     def to_dict(self):
-        return {'D': self.D, 'x0': self.x0, 'y0': self.y0, 'z0': self.z0}
+        return {'D': self.D, 'x0': self.x0, 'y0': self.y0, 'z0': self.z0
+               ,'dye0' : self.dye0, 'dye_center': self.dye_center}
 
 
 class Particles(object):
     """A list of Particle() objects and a few attributes."""
 
     @staticmethod
-    def _generate(num_particles, D, box, rs):
+    def _generate(num_particles, D, dye_center, box, rs):
         """Generate a list of `Particle` objects."""
         X0 = rs.rand(num_particles) * (box.x2 - box.x1) + box.x1
         Y0 = rs.rand(num_particles) * (box.y2 - box.y1) + box.y1
         Z0 = rs.rand(num_particles) * (box.z2 - box.z1) + box.z1
-        return [Particle(D=D, x0=x0, y0=y0, z0=z0)
-                for x0, y0, z0 in zip(X0, Y0, Z0)]
+        Dye0 = rs.normal(loc=dye_center, scale = 5., size=num_particles)
+        centers = np.ones(num_particles)*dye_center
+        return [Particle(D=D, x0=x0, y0=y0, z0=z0, dye0=dye0, dye_center=dc)
+                for x0, y0, z0, dye0, dc in zip(X0, Y0, Z0, Dye0, centers)]
 
     @staticmethod
-    def from_specs(num_particles, D, box, rs=None, seed=1):
+    def from_specs(num_particles, D, dye_center, box, rs=None, seed=1):
         """
         Create particles populations in a single-step.
 
@@ -125,9 +130,9 @@ class Particles(object):
         assert len(num_particles) > 0, msg
         msg = 'ERROR: `num_particles` and `D` must have the same length.'
         assert len(num_particles) == len(D), msg
-        P = Particles(num_particles[0], D[0], box, rs=rs, seed=seed)
-        for num_particle, D in zip(num_particles[1:], D[1:]):
-            P.add(num_particles=num_particle, D=D)
+        P = Particles(num_particles[0], D[0], dye_center[0], box, rs=rs, seed=seed)
+        for num_particle, D, dcenter in zip(num_particles[1:], D[1:], dye_center[1:]):
+            P.add(num_particles=num_particle, D=D, dye_center=dcenter)
         return P
 
     @staticmethod
@@ -143,12 +148,13 @@ class Particles(object):
             i_prev += num_particles
         return slices
 
-    def __init__(self, num_particles, D, box, rs=None, seed=1, particles=None):
+    def __init__(self, num_particles, D, dye_center, box, rs=None, seed=1, particles=None):
         """A set of `N` Particle() objects with random position in `box`.
 
         Arguments:
             num_particles (int): number of particles to be generated
             D (float): diffusion coefficient in S.I. units (m^2/s)
+            dye_center: list of dye centers with length=num_particles
             box (Box object): the simulation box
             rs (RandomState object): random state object used as random number
                 generator. If None, use a random state initialized from seed.
@@ -163,19 +169,22 @@ class Particles(object):
         self.init_random_state = rs.get_state()
         self.box = box
         if particles is None:
-            self._plist = self._generate(num_particles, D, box, rs)
+            self._plist = self._generate(num_particles, D, dye_center, box, rs)
         else:
             self._plist = list(particles)
         self.rs_hash = hashfunc(self.init_random_state)[:3]
 
-    def add(self, num_particles, D):
+    def add(self, num_particles, D, dye_center):
         """Add particles with diffusion coefficient `D` at random positions.
         """
         if D in self.diffusion_coeff:
             msg = ('A population with this diffusion coefficient is already '
                    'present. Change diffusion coefficient to add a new population.')
             raise ValueError(msg)
-        self._plist += self._generate(num_particles, D, box=self.box, rs=self.rs)
+        self._plist += self._generate(num_particles, D
+                                    ,dye_center = dye_center
+                                    ,box=self.box
+                                    ,rs=self.rs)
 
     def to_list(self):
         return self._plist.copy()
@@ -187,7 +196,7 @@ class Particles(object):
     def from_json(cls, json_str):
         particles = [Particle(**p) for p in json.loads(json_str)['particles']]
         # This returned obj will throw an error if the user calls .add()
-        return cls(particles=particles, num_particles=None, D=None, box=None)
+        return cls(particles=particles, num_particles=None, D=None, box=None, dye_center=None)
 
     def __iter__(self):
         return iter(self._plist)
@@ -208,6 +217,16 @@ class Particles(object):
     def positions(self):
         """Initial position for each particle. Shape (N, 3, 1)."""
         return np.vstack([p.r0 for p in self]).reshape(len(self), 3, 1)
+    
+    @property
+    def dye_centers(self):
+        """Center of dye distance distribution for each particle"""
+        return np.hstack([p.dye_center for p in self])
+    
+    @property
+    def dye_distances(self):
+        """Initial dye distances for each particle"""
+        return np.hstack([p.dye0 for p in self])
 
     @property
     def diffusion_coeff(self):
@@ -302,17 +321,20 @@ class ParticlesSimulation(object):
         psf_pytables = store.h5file.get_node('/psf/default_psf')
         psf = psf_from_pytables(psf_pytables)
         box = store.h5file.get_node_attr('/parameters', 'box')
+        T = store.h5file.get_node_attr('/parameters', 'T')
+        #E_method = store.h5file.get_node_attr('/parameters','E_method')
         P = store.h5file.get_node_attr('/parameters', 'particles')
 
         names = ['t_step', 't_max', 'EID', 'ID']
         kwargs = {name: store.numeric_params[name] for name in names}
         S = ParticlesSimulation(particles=Particles.from_json(P), box=box,
-                                psf=psf, **kwargs)
+                                T=T, psf=psf, **kwargs)
 
         # Emulate S.open_store_traj()
         S.store = store
         S.psf_pytables = psf_pytables
         S.traj_group = S.store.h5file.root.trajectories
+        S.dye_distance = S.traj_group.dye_distance
         S.emission = S.traj_group.emission
         S.emission_tot = S.traj_group.emission_tot
         if 'position' in S.traj_group:
@@ -354,7 +376,7 @@ class ParticlesSimulation(object):
                 print("INFO: Random state initialized from seed (%d)." % seed)
         return rs
 
-    def __init__(self, t_step, t_max, particles, box, psf, EID=0, ID=0):
+    def __init__(self, t_step, t_max, particles, box, T, psf, EID=0, ID=0):
         """Initialize the simulation parameters.
 
         Arguments:
@@ -377,6 +399,8 @@ class ParticlesSimulation(object):
         self.psf = psf
         self.t_step = t_step
         self.t_max = t_max
+        self.T = T
+        self.kbT = kb*T
         self.ID = ID
         self.EID = EID
         self.n_samples = int(t_max / t_step)
@@ -392,6 +416,14 @@ class ParticlesSimulation(object):
     @property
     def sigma_1d(self):
         return [np.sqrt(2 * par.D * self.t_step) for par in self.particles]
+    
+    @property
+    def sigma_dye(self):
+        """
+        Calculate the sigma for dye distance distribution.
+        Do I need to make this particle specific damping?
+        """
+        return [np.sqrt(2 * self.kbT) for par in self.particles]
 
     def __repr__(self):
         pM = self.concentration(pM=True)
@@ -441,9 +473,12 @@ class ParticlesSimulation(object):
         """
         nparams = dict(
             D = (self.diffusion_coeff.mean(), 'Diffusion coefficient (m^2/s)'),
+            T = (self.T, 'Langevin Simulation Temperature (K)'),
             np = (self.num_particles, 'Number of simulated particles'),
             t_step = (self.t_step, 'Simulation time-step (s)'),
             t_max = (self.t_max, 'Simulation total time (s)'),
+            #E_method = (self.E_method, 'Method to calculate efficiency'),
+            #R0 = (self.R0,'FRET efficiency coefficient'),
             ID = (self.ID, 'Simulation ID (int)'),
             EID = (self.EID, 'IPython Engine ID (int)'),
             pico_mol = (self.concentration() * 1e12,
@@ -497,7 +532,7 @@ class ParticlesSimulation(object):
             Store object.
         """
         store_fname = '%s_%s.hdf5' % (prefix, self.compact_name())
-        attr_params = dict(particles=self.particles.to_json(), box=self.box)
+        attr_params = dict(particles=self.particles.to_json(), box=self.box, T=self.T)
         kwargs = dict(path=path, nparams=self.numeric_params,
                       attr_params=attr_params, mode=mode)
         store_obj = store(store_fname, **kwargs)
@@ -527,6 +562,7 @@ class ParticlesSimulation(object):
         self.emission_tot = self.store.add_emission_tot(**kwargs)
         self.emission = self.store.add_emission(**kwargs)
         self.position = self.store.add_position(radial=radial, **kwargs)
+        self.dye_distance = self.store.add_dye_distance(**kwargs)
 
     def open_store_timestamp(self, path=None, mode='w'):
         """Open and setup the on-disk storage file (pytables HDF5 file).
@@ -610,6 +646,64 @@ class ParticlesSimulation(object):
             # Update start_pos in-place for current particle
             start_pos[i] = pos[:, -1:]
         return POS, em
+    
+
+    def _sim_langevin(self, time_size, start_dye_dist, rs, k=1e-4, mass=1., diffusion=2e-3): 
+        #vectorized production of trajectories as per langevin dynamics.
+        #Arguments:#
+        #num_particles - number of trajectories desired
+        #mass of particles - list
+        #dt time step 
+        #T temperature
+        #centers center of harmonic - list
+        #k - force constant for potential - list
+        #damping - 1 is overdamped langevin
+        #vectorized
+        #time_size = int(time_size)
+        #time_langevin = int(time_size/dt)
+        #skip = int(1/dt)
+        num_particles = self.num_particles
+        t_step = 1 #self.t_step
+        #sig = self.sigma_dye
+        beta = 1/(self.kbT)
+        #g = np.sqrt(2/(beta*t_step*damping))
+        #t=0
+        #rs.random.seed(99)
+        #randomSampling = np.random.random_sample(num_particles)#random numbers from 0-1
+        def der_bistable(x,x0,wid=15,spr=0.001):
+            diff = np.subtract(x,x0)
+            return -spr*(diff)*((diff)**2-wid**2)
+        v = np.zeros(num_particles)
+        traj = np.zeros((time_size, num_particles),dtype='float64')
+        cen = self.particles.dye_centers 
+        X = start_dye_dist #np.copy(cen) + (np.random.rand(len(cen))-0.5) * 15
+        D = diffusion #0.01 #1.5e8
+        root2D = np.sqrt(2*D*t_step)
+        step=0
+        #step_skip = 0
+        #k=0.04
+        w=15. #7.5
+        #pot=0.0
+    
+        #while (step < time_langevin):
+        while (step < time_size):
+
+            #randomd, deviateAvailable = randn(0,1,deviateAvailable)
+            randomd = rs.normal(loc=0, scale=1, size=num_particles)
+            #diff = np.subtract(X,cen) 
+            #v = g * randomd - k*diff/damping
+            #pot = -k*diff
+            #pot = -k*(X-cen)*((X-cen)**2-w**2)
+            pot = der_bistable(X,cen,wid=w,spr=k)
+            X += root2D*randomd + pot*beta*D*t_step
+            #X = X + t_step * v
+            #if (step % skip == 0):
+            X[X<0] = 0.
+            traj[step] = X
+            step += 1
+        start_dye_dist = X
+        return np.transpose(traj)
+
 
     def simulate_diffusion(self, save_pos=False, total_emission=True,
                            radial=False, rs=None, seed=1, path='./',
@@ -646,6 +740,8 @@ class ParticlesSimulation(object):
         self.traj_group._v_attrs['init_random_state'] = rs.get_state()
 
         em_store = self.emission_tot if total_emission else self.emission
+        dye_dist_store = self.dye_distance
+        #eff_store = self.efficiency
 
         print('- Start trajectories simulation - %s' % ctime(), flush=True)
         if verbose:
@@ -655,6 +751,7 @@ class ParticlesSimulation(object):
         chunk_duration = t_chunk_size * self.t_step
 
         par_start_pos = self.particles.positions
+        par_start_dist = self.particles.dye_distances
         prev_time = 0
         for time_size in iter_chunksize(self.n_samples, t_chunk_size):
             if verbose:
@@ -667,11 +764,23 @@ class ParticlesSimulation(object):
                                              total_emission=total_emission,
                                              save_pos=save_pos, radial=radial,
                                              wrap_func=wrap_func)
-
+            R = self._sim_langevin(time_size
+                    ,par_start_dist
+                    ,rs
+                    ,k=1e-4
+                    ,diffusion=2e-3)
+            
+            #if self.E_method == "empirical":
+            #    E = 1/(1.+0.975*(R/self.R0)**2.65)
+            #elif self.E_method == "theoretical":
+            #    E = 1/(1+(R/self.R0)**6)
+            #E_values = efficiency()
             # Append em to the permanent storage
             # if total_emission, data is just a linear array
             # otherwise is a 2-D array (self.num_particles, c_size)
             em_store.append(em)
+            dye_dist_store.append(R)
+            #eff_store.append(E)
             if save_pos:
                 self.position.append(np.vstack(POS).astype('float32'))
             i_chunk += 1
@@ -700,6 +809,7 @@ class ParticlesSimulation(object):
 
     def _get_ts_name_mix(self, max_rates, populations, bg_rate, rs,
                          hashsize=6):
+        #print(max_rates,populations,bg_rate)
         s = self._get_ts_name_mix_core(max_rates, populations, bg_rate)
         return '%s_rs_%s' % (s, hashfunc(rs.get_state())[:hashsize])
 
@@ -831,10 +941,12 @@ class ParticlesSimulation(object):
                 ts_positions = ts_positions[index_sort]
 
         return ts_times, ts_particles, ts_positions
+    
+                       
 
-    def _sim_timestamps_populations(self, emission, max_rates, populations,
+    def _sim_timestamps_populations(self, emission, max_rates, max_rates_full, populations,
                                     bg_rate, i_start, rs,
-                                    position=None, scale=10):
+                                    position=None, scale=1):
         """Simulate timestamps for all the populations of particles.
 
         This method simulates timestamps for a time-chunk starting at
@@ -886,12 +998,13 @@ class ParticlesSimulation(object):
             is_last_population = ipop == len(populations) - 1
             bg = bg_rate if is_last_population else None
             emission_pop = emission[pop]
+            max_rate_pop = max_rates[pop]
             position_pop = position[pop] if save_pos else None
             counts_pop = sim_counts_timetrace_with_bg(
-                emission_pop, max_rate, bg, self.t_step, rs=rs)
+                emission_pop, max_rate_pop, bg, self.t_step, rs=rs)
             ts_times_pop, ts_particles_pop, ts_positions_pop = \
                 self._timestamps_from_counts(
-                    counts_pop, times, max_rate=max_rate,
+                    counts_pop, times, max_rate=max_rate_pop,
                     sort=False, position=position_pop)
             ts_particles_pop += pop.start
             ts_times_poplist.append(ts_times_pop)
@@ -915,10 +1028,10 @@ class ParticlesSimulation(object):
             ts_positions = ts_positions[index_sort]
         return ts_times, ts_particles, ts_positions
 
-    def simulate_timestamps_mix(self, max_rates, populations, bg_rate,
+    def simulate_timestamps_mix(self, max_rates, max_rates_full, populations, bg_rate,
                                 rs=None, seed=1, chunksize=2**16,
                                 comp_filter=None, overwrite=False,
-                                skip_existing=False, scale=10, save_pos=False,
+                                skip_existing=False, scale=1, save_pos=False,
                                 path=None, t_chunksize=None, timeslice=None):
         """Compute a timestamps array for a mixture of N populations.
 
@@ -962,11 +1075,12 @@ class ParticlesSimulation(object):
         if timeslice is not None:
             timeslice_size = timeslice // self.t_step
 
-        name = self._get_ts_name_mix(max_rates, populations, bg_rate, rs=rs)
+        name = self._get_ts_name_mix(max_rates_full, populations, bg_rate, rs=rs)
+        #name = "TEST"
         kw = dict(
             name=name, clk_p=self.t_step / scale,
-            max_rates=max_rates, bg_rate=bg_rate, populations=populations,
-            num_particles=self.num_particles,
+            max_rates=max_rates_full, bg_rate=bg_rate, 
+            populations=populations, num_particles=self.num_particles,
             bg_particle=self.num_particles,
             overwrite=overwrite, chunksize=chunksize,
             save_pos=save_pos,
@@ -1002,13 +1116,19 @@ class ParticlesSimulation(object):
                 prev_time = curr_time
 
             em_chunk = self.emission[:, i_start:i_end]
+            max_rates_chunk = max_rates[:, i_start:i_end]
+            #E_chunk = self.efficiency[:, i_start:i_end]
+            #em_rates_d, em_rates_a = em_rates_from_E_DA_mix(max_rates_full, E_chunk)
+
+            #dye_dist_chunk = self.dye_distance[:,istart:iend]
+            #E_chunk = 1./(1+0.975*(dye_dist_chunk/56.)**(2.65))
             if save_pos:
                 pos_chunk = self.position[:, :, i_start:i_end]
 
             ts_times_chunk, ts_particles_chunk, ts_positions_chunk = \
                 self._sim_timestamps_populations(
-                    em_chunk, max_rates, populations, bg_rate, i_start,
-                    rs, scale=scale, position=pos_chunk)
+                    em_chunk, max_rates_chunk, max_rates_full, populations, bg_rate, i_start,
+                    rs=rs, scale=scale, position=pos_chunk)
 
             # Save sorted "photons" (suffix '_s')
             ts_list.append(ts_times_chunk)
@@ -1030,7 +1150,7 @@ class ParticlesSimulation(object):
                                    populations, bg_rate_d, bg_rate_a,
                                    rs=None, seed=1, chunksize=2**16,
                                    comp_filter=None, overwrite=False,
-                                   skip_existing=False, scale=10,
+                                   skip_existing=False, scale=1,
                                    path=None, t_chunksize=2**19,
                                    timeslice=None):
 
@@ -1131,15 +1251,17 @@ class ParticlesSimulation(object):
                 prev_time = curr_time
 
             em_chunk = self.emission[:, i_start:i_end]
-
+            max_rates_d_chunk = max_rates_d[:, i_start:i_end]
+            max_rates_a_chunk = max_rates_a[:, i_start:i_end]
+	    
             times_chunk_s_d, par_index_chunk_s_d, _ = \
                 self._sim_timestamps_populations(
-                    em_chunk, max_rates_d, populations, bg_rate_d, i_start,
+                    em_chunk, max_rates_d_chunk, populations, bg_rate_d, i_start,
                     rs=rs, scale=scale)
 
             times_chunk_s_a, par_index_chunk_s_a, _ = \
                 self._sim_timestamps_populations(
-                    em_chunk, max_rates_a, populations, bg_rate_a, i_start,
+                    em_chunk, max_rates_a_chunk, populations, bg_rate_a, i_start,
                     rs=rs, scale=scale)
 
             # Save sorted timestamps (suffix '_s') and corresponding particles
@@ -1157,7 +1279,7 @@ class ParticlesSimulation(object):
                                  populations, bg_rate_d, bg_rate_a,
                                  rs=None, seed=1, chunksize=2**16,
                                  comp_filter=None, overwrite=False,
-                                 skip_existing=False, scale=10,
+                                 skip_existing=False, scale=1,
                                  path=None, t_chunksize=2**19,
                                  timeslice=None):
         """Compute D and A timestamps arrays for a mixture of N populations.
@@ -1332,7 +1454,6 @@ def sim_counts_timetrace_with_bg(emission, max_rate, bg_rate, t_step, rs=None):
         counts[:-1] = counts_par
         counts[-1] = rs.poisson(lam=bg_rate * t_step, size=em.shape[1])
     return counts
-
 
 def sim_timetrace_bg2(emission, max_rate, bg_rate, t_step, rs=None):
     """Draw random emitted photons from r.v. ~ Poisson(emission_rates).
