@@ -15,6 +15,7 @@ import itertools
 from pathlib import Path
 from time import ctime
 import json
+import warnings
 
 import numpy as np
 from numpy import array, sqrt
@@ -78,11 +79,12 @@ class Box:
 
 class Particle(object):
     """Class to describe a single particle."""
-    def __init__(self, D, x0, y0, z0, dye0, dye_center,free_energy):
+    def __init__(self, D, x0, y0, z0, dye0, free_energy, D_L):
         self.D = D   # diffusion coefficient in SI units, m^2/s
         self.x0, self.y0, self.z0, self.dye0 = x0, y0, z0, dye0
         #self.dye_center = dye_center
         self.free_energy = free_energy
+        self.D_L = D_L
 
     @property
     def r0(self):
@@ -93,28 +95,35 @@ class Particle(object):
 
     def to_dict(self):
         return {'D': self.D, 'x0': self.x0, 'y0': self.y0, 'z0': self.z0
-                ,'dye0' : self.dye0 #, 'dye_center': self.dye_center
-                ,'free_energy': self.free_energy}
+                ,'dye0' : self.dye0 , 'dye0': self.dye0
+                ,'free_energy': self.free_energy.__doc__
+                ,'D_L': self.D_L
+                }
 
 
 class Particles(object):
     """A list of Particle() objects and a few attributes."""
 
     @staticmethod
-    def _generate(num_particles, D, free_energy, box, rs):
+    def _generate(num_particles, D, free_energy, D_L, dye0, box, rs):
     #def _generate(num_particles, D, dye_center, box, rs):
         """Generate a list of `Particle` objects."""
         X0 = rs.rand(num_particles) * (box.x2 - box.x1) + box.x1
         Y0 = rs.rand(num_particles) * (box.y2 - box.y1) + box.y1
         Z0 = rs.rand(num_particles) * (box.z2 - box.z1) + box.z1
-        Dye0 = rs.normal(loc=dye_center, scale = 5., size=num_particles)
+        #free_energies = free_energy
+        if dye0 is not None:
+            Dye0 = dye0
+        else:
+            #Dye0 = rs.normal(loc=dye_center, scale = 5., size=num_particles)
+            Dye0 = rs.uniform(20,100, size=num_particles)
         #centers = np.ones(num_particles)*dye_center
-        free_energies = free_energy
-        return [Particle(D=D, x0=x0, y0=y0, z0=z0, dye0=dye0, dye_center=dc)
-                for x0, y0, z0, fe, dc in zip(X0, Y0, Z0, free_energies, centers)]
+        print("XXX",num_particles,len(X0),len(Dye0))
+        return [Particle(D=D, x0=x0, y0=y0, z0=z0, dye0=d0,free_energy=free_energy, D_L=D_L)
+                for x0, y0, z0, d0 in zip(X0, Y0, Z0, Dye0)]
 
     @staticmethod
-    def from_specs(num_particles, D, free_energy, box, rs=None, seed=1):
+    def from_specs(num_particles, D, free_energy, D_L, box, dye0=None, rs=None, seed=1):
     #def from_specs(num_particles, D, dye_center, box, rs=None, seed=1):
         """
         Create particles populations in a single-step.
@@ -135,10 +144,13 @@ class Particles(object):
         assert len(num_particles) > 0, msg
         msg = 'ERROR: `num_particles` and `D` must have the same length.'
         assert len(num_particles) == len(D), msg
+        msg = 'ERROR: `num_particles` and `free_energy` must have the same length.'
+        assert len(num_particles) == len(free_energy) == len(D_L), msg
+        #assert sum(num_particles) == sum(sum(x) if isinstance(x,list) else x for x in lang_pops)
         #P = Particles(num_particles[0], D[0], dye_center[0], box, rs=rs, seed=seed)
-        P = Particles(num_particles[0], D[0], free_energy[0], box, rs=rs, seed=seed)
-        for num_particle, D, fe in zip(num_particles[1:], D[1:], free_energy[1:]):
-            P.add(num_particles=num_particle, D=D, free_energy=fe)
+        P = Particles(num_particles[0], D[0], free_energy[0], D_L[0], box, dye0, rs=rs, seed=seed)
+        for num_particle,d,fe,dL,d0 in zip(num_particles[1:],D[1:],free_energy[1:],D_L[1:],dye0[1:]):
+            P.add(num_particles=num_particle, D=d, free_energy=fe,D_L=dL ,dye0=d0)
         return P
 
     @staticmethod
@@ -154,14 +166,15 @@ class Particles(object):
             i_prev += num_particles
         return slices
 
-    def __init__(self, num_particles, D, free_energy, box, rs=None, seed=1, particles=None):
+    def __init__(self, num_particles, D, free_energy, D_L, box, dye0=None, rs=None, seed=1, particles=None):
     #def __init__(self, num_particles, D, dye_center, box, rs=None, seed=1, particles=None):
         """A set of `N` Particle() objects with random position in `box`.
 
         Arguments:
             num_particles (int): number of particles to be generated
             D (float): diffusion coefficient in S.I. units (m^2/s)
-            dye_center: list of dye centers with length=num_particles
+            free_energy: list of length num_particles do describe free energy funcion
+            dye0: list of dye initial 1-d position with length=num_particles
             box (Box object): the simulation box
             rs (RandomState object): random state object used as random number
                 generator. If None, use a random state initialized from seed.
@@ -176,22 +189,28 @@ class Particles(object):
         self.init_random_state = rs.get_state()
         self.box = box
         if particles is None:
-            self._plist = self._generate(num_particles, D, free_energy, box, rs)
+            #for pop,fe,dl in zip(num_particles,free_energy, D_L):
+            self._plist = self._generate(num_particles, D, free_energy, D_L, dye0, box, rs)
         else:
             self._plist = list(particles)
         self.rs_hash = hashfunc(self.init_random_state)[:3]
+        #print(self._plist()
 
-    def add(self, num_particles, D, free_energy):
+    def add(self, num_particles, D, free_energy, D_L, dye0):
     #def add(self, num_particles, D, dye_center):
         """Add particles with diffusion coefficient `D` at random positions.
         """
         if D in self.diffusion_coeff:
             msg = ('A population with this diffusion coefficient is already '
                    'present. Change diffusion coefficient to add a new population.')
-            raise ValueError(msg)
+            #raise ValueError(msg)
+            warnings.warn("WARNING: "+msg)
+        print("YYY",num_particles,D,D_L)
+        print(self._plist)
         self._plist += self._generate(num_particles, D
-                                    free_energy = free_energy
-                                    #,dye_center = dye_center
+                                    ,free_energy=free_energy
+                                    ,D_L=D_L
+                                    ,dye0 = dye0
                                     ,box=self.box
                                     ,rs=self.rs)
 
@@ -206,7 +225,7 @@ class Particles(object):
         particles = [Particle(**p) for p in json.loads(json_str)['particles']]
         # This returned obj will throw an error if the user calls .add()
         #return cls(particles=particles, num_particles=None, D=None, box=None, dye_center=None)
-        return cls(particles=particles, num_particles=None, D=None, box=None, free_energy=None)
+        return cls(particles=particles, num_particles=None, D=None, box=None, free_energy=None, D_L=None)
 
     def __iter__(self):
         return iter(self._plist)
@@ -228,11 +247,6 @@ class Particles(object):
         """Initial position for each particle. Shape (N, 3, 1)."""
         return np.vstack([p.r0 for p in self]).reshape(len(self), 3, 1)
     
-    #@property
-    #def dye_centers(self):
-    #    """Center of dye distance distribution for each particle"""
-    #    return np.hstack([p.dye_center for p in self])
-    
     @property
     def dye_distances(self):
         """Initial dye distances for each particle"""
@@ -241,6 +255,14 @@ class Particles(object):
     @property
     def diffusion_coeff(self):
         return np.array([par.D for par in self])
+    
+    @property
+    def free_energy(self):
+        return np.array([par.free_energy for par in self])
+
+    @property
+    def langevin_diffusion_coeff(self):
+        return np.array([par.D_L for par in self])
 
     @property
     def num_populations(self):
@@ -686,8 +708,9 @@ class ParticlesSimulation(object):
         #    return -spr*(diff)*((diff)**2-wid**2)
         v = np.zeros(num_particles)
         traj = np.zeros((time_size, num_particles),dtype='float64')
-        cen = self.particles.dye_centers 
+        #cen = self.particles.dye_centers 
         X = start_dye_dist #np.copy(cen) + (np.random.rand(len(cen))-0.5) * 15
+        print('start',X)
         D = diffusion #0.01 #1.5e8
         root2D = np.sqrt(2*D*t_step)
         step=0
@@ -706,11 +729,12 @@ class ParticlesSimulation(object):
             #pot = -k*diff
             #pot = -k*(X-cen)*((X-cen)**2-w**2)
             #pot = der_bistable(X,cen,wid=w,spr=k)
-            pot = [fe(X) for fe in free_energy]
-            X += root2D*randomd + pot*beta*D*t_step
+            pot = np.array([fe(X) for fe in free_energy])
+            print(pot, D)
+            X += root2D*randomd + pot.flatten()*beta*D*t_step
             #X = X + t_step * v
             #if (step % skip == 0):
-            X[X<0] = 0.
+            X[X<0] = 0. #Safeguard to ensure positive values
             traj[step] = X
             step += 1
         start_dye_dist = X
@@ -781,7 +805,9 @@ class ParticlesSimulation(object):
                     ,rs
                     #,k=1e-4
                     #,diffusion=2e-3
-                    ,self.particles.free_energy)
+                    ,self.particles.free_energy
+                    ,self.particles.langevin_diffusion_coeff
+                    )
             
             #if self.E_method == "empirical":
             #    E = 1/(1.+0.975*(R/self.R0)**2.65)

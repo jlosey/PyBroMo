@@ -177,6 +177,7 @@ class TrajectoryStore(BaseStore):
         num_t_steps = nparams['t_max'] / nparams['t_step']
 
         chunkshape = self.calc_chunkshape(chunksize, shape, kind=chunkslice)
+        print(shape)
         store_array = self.h5file.create_earray(
             group, name, atom=atom,
             shape = shape,
@@ -233,6 +234,20 @@ class TrajectoryStore(BaseStore):
                                    comp_filter=comp_filter,
                                    atom=tables.Float32Atom(),
                                    title=title,
+                                   params=params)
+    
+    def add_dye_distance(self, chunksize=2**19, chunkslice='bytes',
+                     comp_filter=default_compression,
+                     overwrite=False, params=None):
+        """Add the `dye_distance` array in '/trajectories'.
+        """
+        num_particles = self.numeric_params['np']
+        return self.add_trajectory('dye_distance', shape=(num_particles, 0),
+                                   overwrite=overwrite, chunksize=chunksize,
+                                   chunkslice=chunkslice,
+                                   comp_filter=comp_filter,
+                                   atom=tables.Float32Atom(),
+                                   title='Dye-dye distance trace of each particle',
                                    params=params)
 
 
