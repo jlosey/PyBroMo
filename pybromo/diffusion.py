@@ -111,7 +111,7 @@ class Particles(object):
         X0 = rs.rand(num_particles) * (box.x2 - box.x1) + box.x1
         Y0 = rs.rand(num_particles) * (box.y2 - box.y1) + box.y1
         Z0 = rs.rand(num_particles) * (box.z2 - box.z1) + box.z1
-        #free_energies = free_energy
+        FE = [free_energy for _ in range(num_particles)]
         if dye0 is not None:
             Dye0 = dye0
         else:
@@ -119,8 +119,8 @@ class Particles(object):
             Dye0 = rs.uniform(20,100, size=num_particles)
         #centers = np.ones(num_particles)*dye_center
         print("XXX",num_particles,len(X0),len(Dye0))
-        return [Particle(D=D, x0=x0, y0=y0, z0=z0, dye0=d0,free_energy=free_energy, D_L=D_L)
-                for x0, y0, z0, d0 in zip(X0, Y0, Z0, Dye0)]
+        return [Particle(D=D, x0=x0, y0=y0, z0=z0, dye0=d0,free_energy=fe, D_L=D_L)
+                for x0, y0, z0, d0, fe in zip(X0, Y0, Z0, Dye0,FE)]
 
     @staticmethod
     def from_specs(num_particles, D, free_energy, D_L, box, dye0=None, rs=None, seed=1):
@@ -148,9 +148,9 @@ class Particles(object):
         assert len(num_particles) == len(free_energy) == len(D_L), msg
         #assert sum(num_particles) == sum(sum(x) if isinstance(x,list) else x for x in lang_pops)
         #P = Particles(num_particles[0], D[0], dye_center[0], box, rs=rs, seed=seed)
-        P = Particles(num_particles[0], D[0], free_energy[0], D_L[0], box, dye0, rs=rs, seed=seed)
-        for num_particle,d,fe,dL,d0 in zip(num_particles[1:],D[1:],free_energy[1:],D_L[1:],dye0[1:]):
-            P.add(num_particles=num_particle, D=d, free_energy=fe,D_L=dL ,dye0=d0)
+        P = Particles(num_particles[0], D[0], free_energy[0], D_L[0], box, dye0[0], rs=rs, seed=seed)
+        for num_part,d,fe,dL,d0 in zip(num_particles[1:],D[1:],free_energy[1:],D_L[1:],dye0[1:]):
+            P.add(num_particles=num_part, D=d, free_energy=fe,D_L=dL ,dye0=d0)
         return P
 
     @staticmethod
@@ -718,6 +718,7 @@ class ParticlesSimulation(object):
         #k=0.04
         w=15. #7.5
         #pot=0.0
+        print(len(free_energy))
     
         #while (step < time_langevin):
         while (step < time_size):
@@ -729,9 +730,8 @@ class ParticlesSimulation(object):
             #pot = -k*diff
             #pot = -k*(X-cen)*((X-cen)**2-w**2)
             #pot = der_bistable(X,cen,wid=w,spr=k)
-            pot = np.array([fe(X) for fe in free_energy])
-            print(pot, D)
-            X += root2D*randomd + pot.flatten()*beta*D*t_step
+            pot = np.array([fe(Xi) for fe,Xi in zip(free_energy,X)])
+            X += root2D*randomd + pot*beta*D*t_step
             #X = X + t_step * v
             #if (step % skip == 0):
             X[X<0] = 0. #Safeguard to ensure positive values
@@ -829,6 +829,13 @@ class ParticlesSimulation(object):
         self.traj_group._v_attrs['last_random_state'] = rs.get_state()
         self.store.h5file.flush()
         print('\n- End trajectories simulation - %s' % ctime(), flush=True)
+
+    def calc_efficiency(self,efficiency=None):
+        """
+        Calculate the efficiency for a given efficency model
+        efficiency: function that takes array of 1-d dye distances
+        """
+        return efficiency(self.dye_distance)
 
     def _get_ts_name_mix_core(self, max_rates, populations, bg_rate,
                               timeslice=None):

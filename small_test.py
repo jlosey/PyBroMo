@@ -11,9 +11,9 @@ import phconvert as phc
 print('PyTables version:', tables.__version__)
 print('PyBroMo version:', pbm.__version__)
 
-sd = int(sys.argv[1])
-BG_A = float(sys.argv[2])
-BG_D = float(sys.argv[3])
+sd = 101010 #int(sys.argv[1])
+BG_A = 1800. #float(sys.argv[2])
+BG_D = 1500. # float(sys.argv[3])
 PSF_X = 0.3e-6 
 PSF_Y = 0.3e-6
 PSF_Z = 0.5e-6
@@ -69,7 +69,7 @@ fe = (f1,f2)
 dff = (D1,D1)
 ldff = (2e-3,2e-3)
 
-dye0 = [[] for i in range(n1+n2)]
+dye0 = None
 
 # Particles definition
 P = pbm.Particles.from_specs(num_particles=(n1,n2)
@@ -79,14 +79,12 @@ P = pbm.Particles.from_specs(num_particles=(n1,n2)
         ,dye0=(None,None)
         ,box=box        
         ,rs=rs)
-
 # Simulation time step (seconds)
 t_step = 1e-7 #5e-8
 
 # Time duration of the simulation (seconds)
 t_max = 0.2
 
-print(P.particles_counts)
 # Particle simulation definition
 S = pbm.ParticlesSimulation(t_step=t_step, t_max=t_max, T=T,
                             particles=P, box=box, psf=psf,
