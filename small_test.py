@@ -83,7 +83,7 @@ P = pbm.Particles.from_specs(num_particles=(n1,n2)
 t_step = 1e-7 #5e-8
 
 # Time duration of the simulation (seconds)
-t_max = 0.2
+t_max = 0.05
 
 # Particle simulation definition
 S = pbm.ParticlesSimulation(t_step=t_step, t_max=t_max, T=T,
@@ -96,7 +96,7 @@ print('Current random state:', pbm.hashfunc(rs.get_state()))
 print(S.compact_name())
 #hsh = S.hash()[:6]
 #S.store.close()
-E = pbm.FRETEfficiency(S, populations = (nn,),
+E = pbm.FRETEfficiency(S, populations = (n1+n2,),
                              em_rates = (200e3,),
                              E_method="theoretical",
                              R0=56.)
@@ -105,7 +105,7 @@ E.add_efficiency_max_rates(t_chunksize=2**19, chunkslice='times')
 params1 = dict(
     em_rates = (200e3,), #em_list,    # Peak emission rates (cps) for each population (D+A)
     #E_values = E,     # FRET efficiency for each population
-    num_particles = (nn,), #p_list,   # Number of particles in each population
+    num_particles = (n1+n2,), #p_list,   # Number of particles in each population
     bg_rate_d = BG_D, #1800,       # Poisson background rate (cps) Donor channel
     bg_rate_a = BG_A, #1200,        # Poisson background rate (cps) Acceptor channel
     #E_method = "theoretical",
@@ -129,7 +129,7 @@ S.ts_store.close()
 #S.store.close()
 #E.fret_store.close()
 #sim1.save_photon_hdf5()
-np.savetxt(f"timestamp_bistable50_theoretical_{sd}_{bga}_{bgd}.txt"
+np.savetxt(f"smalltest_bistable50_theoretical_{sd}_{BG_A}_{BG_D}.txt"
         ,np.column_stack((ts_1,ts_1*t_step,dt_1,p_1))
         ,fmt=['%d','%f','%d','%d']
         ,header = str1.lstrip()

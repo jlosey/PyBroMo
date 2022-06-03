@@ -177,7 +177,6 @@ class TrajectoryStore(BaseStore):
         num_t_steps = nparams['t_max'] / nparams['t_step']
 
         chunkshape = self.calc_chunkshape(chunksize, shape, kind=chunkslice)
-        print(shape)
         store_array = self.h5file.create_earray(
             group, name, atom=atom,
             shape = shape,
@@ -235,7 +234,7 @@ class TrajectoryStore(BaseStore):
                                    atom=tables.Float32Atom(),
                                    title=title,
                                    params=params)
-    
+
     def add_dye_distance(self, chunksize=2**19, chunkslice='bytes',
                      comp_filter=default_compression,
                      overwrite=False, params=None):
@@ -273,7 +272,7 @@ class TimestampStore(BaseStore):
             if 'timestamps' not in self.h5file.root:
                 self.h5file.create_group('/', 'timestamps',
                                          'Simulated timestamps')
-
+    
     def add_timestamps(self, name, clk_p, max_rates, bg_rate,
                        num_particles, bg_particle, populations=None,
                        overwrite=False, chunksize=2**16,
@@ -299,6 +298,7 @@ class TimestampStore(BaseStore):
             title = 'Simulated photon timestamps')
         times_array.set_attr('clk_p', clk_p)
         times_array.set_attr('max_rates', max_rates)
+        #times_array.set_attr('max_rates_full', max_rates_full)
         times_array.set_attr('bg_rate', bg_rate)
         times_array.set_attr('populations', populations)
         times_array.set_attr('PyBroMo', __version__)
@@ -336,6 +336,215 @@ if __name__ == '__main__':
          't_max': (0.1, 'Simulation total time (s)'),
          't_step': (5e-07, 'Simulation time-step (s)')}
     store = TrajectoryStore('h2.h5', d)
+
+
+class FRETStore(BaseStore):
+    """An on-disk HDF5 store for efficiencies.
+    """
+    def __init__(self, datafile, path='./', nparams=None, attr_params=None,
+                 mode='r'):
+        """Return a new HDF5 file to store simulation results.
+
+        The HDF5 file has two groups:
+        '/parameters'
+            containing all the simulation numeric-parameters
+
+        '/trajectories'
+            containing simulation trajectories (positions, emission traces)
+
+        If `mode='w'`, `datafile` will be overwritten (if exists).
+        """
+        super().__init__(datafile, path=path, nparams=nparams,
+                         attr_params=attr_params, mode=mode)
+        if mode != 'r':
+            # Create the groups
+            self.h5file.create_group('/', 'fret',
+                                     'Simulated efficiencies and max emission rates')
+            #self.h5file.create_group('/', 'max_rates_d',
+            #                         'Donor maximum emission rate')
+            #self.h5file.create_group('/', 'max_rates_a',
+            #                         'Acceptor maximum emission rate')
+            #self.h5file.create_group('/', 'psf', 'PSFs used in the simulation')
+    
+    def add_trajectory(self, name, overwrite=False, shape=(0,), title='',
+                       chunksize=2**19, chunkslice='bytes',
+                       comp_filter=default_compression,
+                       atom=tables.Float32Atom(), params=None):
+        """Add an trajectory array in '/trajectories'.
+        """
+        if params is None: params = {}
+        group = self.h5file.root.trajectories
+        if name in group:
+            print("%s already exists ..." % name, end='')
+            if overwrite:
+                self.h5file.remove_node(group, name)
+                print(" deleted.")
+            else:
+                print(" old returned.")
+                return group.get_node(name)
+
+        #nparams = self.numeric_params
+        #num_t_steps = nparams['t_max'] / nparams['t_step']
+
+        chunkshape = self.calc_chunkshape(chunksize, shape, kind=chunkslice)
+        store_array = self.h5file.create_earray(
+            group, name, atom=atom,
+            shape = shape,
+            chunkshape = chunkshape,
+            expectedrows = num_t_steps,
+            filters = comp_filter,
+            title = title)
+
+        # Set the array parameters/attributes
+        for key, value in params.items():
+            store_array.set_attr(key, value)
+        store_array.set_attr('PyBroMo', __version__)
+        store_array.set_attr('creation_time', current_time())
+        return store_array
+
+    def add_efficiency(self, num_particles,
+                        chunksize=2**19, chunkslice='bytes',
+                        comp_filter=default_compression,
+                        overwrite=False, params=None):
+        """
+        Add the `efficiency` array in '/trajectories'.
+        """
+        #num_particles = self.numeric_params['np']
+        #return self.add_trajectory('efficiency', shape=(num_particles, 0),
+        #                           overwrite=overwrite, chunksize=chunksize,
+        #                           chunkslice=chunkslice,
+        #                           comp_filter=comp_filter,
+        #                           atom=tables.Float32Atom(),
+        #                           title='FRET efficiency from dye-dye distance of each particle',
+        #                           params=params)
+        name=['efficiencies','max_rates_d','max_rates_a']
+        if name[0] in self.h5file.root.fret:
+            if overwrite:
+                self.h5file.remove_node('/fret', name='efficiencies')
+                self.h5file.remove_node('/fret', name='max_rates_d')
+                self.h5file.remove_node('/fret', name='max_rates_a')
+                #self.h5file.remove_node('/efficiency', name=name + '_par')
+                try:
+                    self.h5file.remove_node('/efficiencies', name=name + '_pos')
+                except tables.NoSuchNodeError:
+                    pass
+            else:
+                msg = 'Efficiency array already exist (%s)' % name
+                raise ExistingArrayError(msg)
+
+        e_array = self.h5file.create_earray(
+            '/fret', 'efficiencies', atom=tables.Float32Atom(),
+            shape = (num_particles,0),
+            chunkshape = (num_particles,chunksize),
+            filters = comp_filter,
+            title = 'Efficiencies')
+        #e_array.set_attr('E_method', E_method)
+        #e_array.set_attr('R0', R0)
+        #efficiency_array.set_attr('max_rates_full', max_rates_full)
+        #efficiency_array.set_attr('bg_rate', bg_rate)
+        #e_array.set_attr('populations', populations)
+        e_array.set_attr('PyBroMo', __version__)
+        e_array.set_attr('creation_time', current_time())
+        mrd_array = self.h5file.create_earray(
+            '/fret', 'max_rates_d', atom=tables.Float32Atom(),
+            shape = (num_particles,0),
+            chunkshape = (num_particles,chunksize),
+            filters = comp_filter,
+            title = 'Donor Max Rates')
+        mrd_array.set_attr('PyBroMo', __version__)
+        mrd_array.set_attr('creation_time', current_time())
+        mra_array = self.h5file.create_earray(
+            '/fret', 'max_rates_a', atom=tables.Float32Atom(),
+            shape = (num_particles,0),
+            chunkshape = (num_particles,chunksize),
+            filters = comp_filter,
+            title = 'Acceptor Max Rates')
+        mra_array.set_attr('PyBroMo', __version__)
+        mra_array.set_attr('creation_time', current_time())
+        return e_array,mrd_array, mra_array
+
+    
+    def add_max_rates_d(self, name, chunksize=2**19, chunkslice='bytes',
+                     comp_filter=default_compression,
+                     overwrite=False, params=None):
+        """
+        Add the `max_rates_d` array in '/max_rates_d'.
+        """
+        #num_particles = self.numeric_params['np']
+        #return self.add_trajectory('max_rates_d', shape=(num_particles, 0),
+        #                           overwrite=overwrite, chunksize=chunksize,
+        #                           chunkslice=chunkslice,
+        #                           comp_filter=comp_filter,
+        #                           atom=tables.Float32Atom(),
+        #                           title='Max donor emission rates from FRET efficiency of each particle',
+        #                           params=params)
+        if name in self.h5file.root.max_rates_d:
+            if overwrite:
+                self.h5file.remove_node('/max_rates_d', name=name)
+                #self.h5file.remove_node('/max_rates_d', name=name + '_par')
+                try:
+                    self.h5file.remove_node('/max_rates_d', name=name + '_pos')
+                except tables.NoSuchNodeError:
+                    pass
+            else:
+                msg = 'Donor max rates array already exist (%s)' % name
+                raise ExistingArrayError(msg)
+
+        mrd_array = self.h5file.create_earray(
+            '/max_rates_d', name, atom=tables.float32Atom(),
+            shape = (0,),
+            chunkshape = (chunksize,),
+            filters = comp_filter,
+            title = 'Donor Max Rates')
+        #e_array.set_attr('max_rate', max_rate)
+        #e_array.set_attr('R0', R0)
+        #efficiency_array.set_attr('max_rates_full', max_rates_full)
+        #efficiency_array.set_attr('bg_rate', bg_rate)
+        #e_array.set_attr('populations', populations)
+        mrd_array.set_attr('PyBroMo', __version__)
+        mrd_array.set_attr('creation_time', current_time())
+        return mrd_array
+
+    def add_max_rates_a(self, name, chunksize=2**19, chunkslice='bytes',
+                     comp_filter=default_compression,
+                     overwrite=False, params=None):
+        """Add the `max_rates_a` array in '/trajectories'.
+        """
+        #num_particles = self.numeric_params['np']
+        #return self.add_trajectory('max_rates_a', shape=(num_particles, 0),
+        #                           overwrite=overwrite, chunksize=chunksize,
+        #                           chunkslice=chunkslice,
+        #                           comp_filter=comp_filter,
+        #                           atom=tables.Float32Atom(),
+        #                           title='Max acceptor emission rates from FRET efficiency of each particle',
+        #                           params=params)
+        
+        if name in self.h5file.root.max_rates_a:
+            if overwrite:
+                self.h5file.remove_node('/max_rates_a', name=name)
+                #self.h5file.remove_node('/max_rates_d', name=name + '_par')
+                try:
+                    self.h5file.remove_node('/max_rates_a', name=name + '_pos')
+                except tables.NoSuchNodeError:
+                    pass
+            else:
+                msg = 'Acceptor max rates array already exist (%s)' % name
+                raise ExistingArrayError(msg)
+
+        e_array = self.h5file.create_earray(
+            '/max_rates_a', name, atom=tables.float32Atom(),
+            shape = (0,),
+            chunkshape = (chunksize,),
+            filters = comp_filter,
+            title = 'Acceptor Max Rates')
+        #e_array.set_attr('max_rates', max_rates)
+        #e_array.set_attr('R0', R0)
+        #efficiency_array.set_attr('max_rates_full', max_rates_full)
+        #efficiency_array.set_attr('bg_rate', bg_rate)
+        #e_array.set_attr('populations', populations)
+        e_array.set_attr('PyBroMo', __version__)
+        e_array.set_attr('creation_time', current_time())
+        return e_array
 
 #    em_tot_array = add_em_tot_array(hf)
 #    em_array = add_em_array(hf)

@@ -17,6 +17,7 @@ from . import plotter
 from .utils import hdf5
 
 from .diffusion import Box, Particles, ParticlesSimulation, hashfunc
+from .efficiency import FRETEfficiency
 from .psflib import GaussianPSF, NumericPSF
 from .timestamps import TimestampSimulation
 

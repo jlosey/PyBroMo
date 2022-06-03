@@ -118,7 +118,6 @@ class Particles(object):
             #Dye0 = rs.normal(loc=dye_center, scale = 5., size=num_particles)
             Dye0 = rs.uniform(20,100, size=num_particles)
         #centers = np.ones(num_particles)*dye_center
-        print("XXX",num_particles,len(X0),len(Dye0))
         return [Particle(D=D, x0=x0, y0=y0, z0=z0, dye0=d0,free_energy=fe, D_L=D_L)
                 for x0, y0, z0, d0, fe in zip(X0, Y0, Z0, Dye0,FE)]
 
@@ -205,8 +204,6 @@ class Particles(object):
                    'present. Change diffusion coefficient to add a new population.')
             #raise ValueError(msg)
             warnings.warn("WARNING: "+msg)
-        print("YYY",num_particles,D,D_L)
-        print(self._plist)
         self._plist += self._generate(num_particles, D
                                     ,free_energy=free_energy
                                     ,D_L=D_L
@@ -680,24 +677,18 @@ class ParticlesSimulation(object):
         return POS, em
     
 
-    def _sim_langevin(self, time_size, start_dye_dist, rs, free_energy, diffusion=2e-3): 
-    #def _sim_langevin(self, time_size, start_dye_dist, rs, k=1e-4, mass=1., diffusion=2e-3): 
-        #vectorized production of trajectories as per langevin dynamics.
-        #Arguments:#
-        #num_particles - number of trajectories desired
-        #mass of particles - list
-        #dt time step 
-        #T temperature
-        #centers center of harmonic - list
-        #k - force constant for potential - list
-        #damping - 1 is overdamped langevin
-        #vectorized
-        #time_size = int(time_size)
-        #time_langevin = int(time_size/dt)
-        #skip = int(1/dt)
+    def _sim_langevin(self, time_size, start_dye_dist, rs, free_energy, diffusion=2e-3):
+        """
+        1-D Langevin dynamics simulation to model internal molecular dynamics between FRET dyes.
+        time_size: length of simulation
+        start_dye_dist: array of initial distances between dyes for each molecule
+        rs: random state
+        free_energy: function that defines the derivative of free energy 
+        diffusion: diffusion constant for the speed  
+        """
+
         num_particles = self.num_particles
         t_step = 1 #self.t_step
-        #sig = self.sigma_dye
         beta = 1/(self.kbT)
         #g = np.sqrt(2/(beta*t_step*damping))
         #t=0
@@ -710,7 +701,6 @@ class ParticlesSimulation(object):
         traj = np.zeros((time_size, num_particles),dtype='float64')
         #cen = self.particles.dye_centers 
         X = start_dye_dist #np.copy(cen) + (np.random.rand(len(cen))-0.5) * 15
-        print('start',X)
         D = diffusion #0.01 #1.5e8
         root2D = np.sqrt(2*D*t_step)
         step=0
@@ -718,7 +708,6 @@ class ParticlesSimulation(object):
         #k=0.04
         w=15. #7.5
         #pot=0.0
-        print(len(free_energy))
     
         #while (step < time_langevin):
         while (step < time_size):
