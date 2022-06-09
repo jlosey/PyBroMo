@@ -11,9 +11,9 @@ import phconvert as phc
 print('PyTables version:', tables.__version__)
 print('PyBroMo version:', pbm.__version__)
 
-sd = 101010 #int(sys.argv[1])
-BG_A = 1800. #float(sys.argv[2])
-BG_D = 1500. # float(sys.argv[3])
+sd = int(sys.argv[1]) #CLI input for random seed
+BG_A = float(sys.argv[2]) #CLI input for acceptor background rate
+BG_D = float(sys.argv[3]) #CLI input for donor background rate
 PSF_X = 0.3e-6 
 PSF_Y = 0.3e-6
 PSF_Z = 0.5e-6
@@ -37,21 +37,17 @@ D1 = 30.*(1e-6)**2
 D2 = D1
 
 # Simulation box definition
-#box = pbm.Box(x1=-4.e-7, x2=4.e-7, y1=-4.e-7, y2=4.e-7, z1=-6e-7, z2=6e-7)
 box = pbm.Box(x1=-4.e-6, x2=4.e-6, y1=-4.e-6, y2=4.e-6, z1=-6e-6, z2=6e-6)
-#box = pbm.Box(x1=-2.e-6, x2=2.e-6, y1=-2.e-6, y2=2.e-6, z1=-3e-6, z2=3e-6)
-#box = pbm.Box(x1=-1.e-6, x2=1.e-6, y1=-1.e-6, y2=1.e-6, z1=-2e-6, z2=2e-6)
 
 # PSF definition
 psf = pbm.GaussianPSF(sx=PSF_X,sy=PSF_Y,sz=PSF_Z)
 #psf = pbm.NumericPSF()
 
+#Population sizes
 n1 = 5 
 n2 = 2
 nn = (n1,n2) # list of populations, 2D needed 
-dc50 = np.ones(n1)*50.
-dc0 = np.ones(n2)*1000.
-dc = np.hstack((dc50,dc0))
+
 # Free Energy function and parameters
 def bistable(x,x0,wid=15,spr=0.001):
     """Not specifically needed for simulation but here for reference"""
@@ -60,7 +56,7 @@ def bistable(x,x0,wid=15,spr=0.001):
 def der_bistable(x,x0,wid=15,spr=0.001):
     """derivative of bistable equation """
     diff = np.subtract(x,x0)
-    return -spr*(diff)*((diff)**2-wid**2)
+    return -spr*(diff)*/((diff)**2-wid**2)
 def f1(x):
     return der_bistable(x,x0=55,wid=10,spr=1e-4)
 def f2(x):
